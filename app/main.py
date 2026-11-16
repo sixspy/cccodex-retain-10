@@ -8,13 +8,20 @@ from itsdangerous import BadSignature, URLSafeSerializer
 from app.config import Config
 from app.db import get_db, init_db
 from app.services import (
+    advance_progress,
+    annotate_judgments,
+    annotate_partitions,
+    build_card,
     execute_judgment,
+    list_advance_logs,
+    list_cards,
     list_judgments,
     list_partitions,
     list_policies,
     list_reports,
     list_runs,
     list_scan_jobs,
+    list_watermarks,
     run_expire_scan,
     run_reconcile,
 )
@@ -111,10 +118,16 @@ def api_policies(request: Request):
 
 
 @app.get("/api/partitions")
-def api_partitions(request: Request, domain_code: str | None = None):
+def api_partitions(
+    request: Request,
+    domain_code: str | None = None,
+    as_of_date: str | None = None,
+):
     require_user(request)
     with get_db() as conn:
-        return {"items": list_partitions(conn, domain_code=domain_code)}
+        items = list_partitions(conn, domain_code=domain_code)
+        items = annotate_partitions(conn, items, as_of_date)
+    return {"items": items}
 
 
 @app.get("/api/scan-jobs")
@@ -137,10 +150,16 @@ async def api_create_scan(request: Request):
 
 
 @app.get("/api/judgments")
-def api_judgments(request: Request, status: str | None = None):
+def api_judgments(
+    request: Request,
+    status: str | None = None,
+    as_of_date: str | None = None,
+):
     require_user(request)
     with get_db() as conn:
-        return {"items": list_judgments(conn, status=status)}
+        items = list_judgments(conn, status=status)
+        items = annotate_judgments(conn, items, as_of_date)
+    return {"items": items}
 
 
 @app.post("/api/judgments/{judgment_id}/execute")
@@ -178,3 +197,60 @@ async def api_reconcile(request: Request):
     with get_db() as conn:
         report = run_reconcile(conn, as_of)
     return {"ok": True, "report": report}
+
+
+@app.get("/api/progress-cards")
+def api_progress_cards(request: Request, as_of_date: str | None = None):
+    require_user(request)
+    try:
+        with get_db() as conn:
+            items = list_cards(conn, as_of_date)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return {"items": items}
+
+
+@app.get("/api/progress-cards/{domain_code}")
+def api_progress_card(
+    request: Request, domain_code: str, as_of_date: str | None = None
+):
+    require_user(request)
+    try:
+        with get_db() as conn:
+            card = build_card(conn, domain_code, as_of_date)
+    except ValueError as exc:
+        if "基准日" in str(exc) and "格式" in str(exc):
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    return {"ok": True, "card": card}
+
+
+@app.post("/api/progress-cards/{domain_code}/advance")
+async def api_advance_progress(request: Request, domain_code: str):
+    require_user(request)
+    body = await request.json()
+    as_of = str(body.get("as_of_date", "")).strip()
+    if not as_of:
+        raise HTTPException(status_code=400, detail="缺少 as_of_date")
+    try:
+        with get_db() as conn:
+            result = advance_progress(conn, domain_code, as_of)
+    except ValueError as exc:
+        detail = str(exc)
+        status = 400 if "格式" in detail else 409
+        raise HTTPException(status_code=status, detail=detail) from exc
+    return result
+
+
+@app.get("/api/watermarks")
+def api_watermarks(request: Request, domain_code: str | None = None):
+    require_user(request)
+    with get_db() as conn:
+        return {"items": list_watermarks(conn, domain_code=domain_code)}
+
+
+@app.get("/api/progress-logs")
+def api_progress_logs(request: Request, domain_code: str | None = None):
+    require_user(request)
+    with get_db() as conn:
+        return {"items": list_advance_logs(conn, domain_code=domain_code)}

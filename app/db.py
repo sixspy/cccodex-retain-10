@@ -106,6 +106,51 @@ CREATE TABLE IF NOT EXISTS meta (
   key TEXT PRIMARY KEY,
   value TEXT NOT NULL
 );
+
+-- 裁撤进度水线：append-only 快照表（本机库记账，落库形态二选一后取此表形态）。
+-- 水位线身份 = (主题域, 到期动作, 策略版本)：策略换动作或换版本即旧线封存，
+-- 新线从 seq=1 重开，绝不混动作续写。当前水线 = 该线 seq 最大的一行。
+CREATE TABLE IF NOT EXISTS watermark_snapshots (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  domain_code TEXT NOT NULL,
+  action_on_expire TEXT NOT NULL CHECK (action_on_expire IN ('归档','销毁')),
+  policy_version INTEGER NOT NULL,
+  seq INTEGER NOT NULL,
+  watermark_date TEXT NOT NULL,
+  completed_count INTEGER NOT NULL CHECK (completed_count > 0),
+  cutoff_date TEXT NOT NULL,
+  as_of_date TEXT NOT NULL,
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  UNIQUE(domain_code, action_on_expire, policy_version, seq)
+);
+
+-- 水位快照不可变：禁止改、删，落库后只能追加。
+CREATE TRIGGER IF NOT EXISTS watermark_snapshots_no_update
+BEFORE UPDATE ON watermark_snapshots
+BEGIN
+  SELECT RAISE(ABORT, '水位快照不可变，只允许追加');
+END;
+
+CREATE TRIGGER IF NOT EXISTS watermark_snapshots_no_delete
+BEFORE DELETE ON watermark_snapshots
+BEGIN
+  SELECT RAISE(ABORT, '水位快照不可变，只允许追加');
+END;
+
+-- 水位推进留痕：成功与失败都记一行，供本机核账。
+CREATE TABLE IF NOT EXISTS progress_advance_logs (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  domain_code TEXT NOT NULL,
+  action_on_expire TEXT NOT NULL DEFAULT '',
+  policy_version INTEGER NOT NULL DEFAULT 0,
+  as_of_date TEXT NOT NULL,
+  ok INTEGER NOT NULL,
+  before_watermark TEXT,
+  after_watermark TEXT,
+  completed_count INTEGER NOT NULL DEFAULT 0,
+  message TEXT NOT NULL DEFAULT '',
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
 """
 
 

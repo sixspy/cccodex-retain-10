@@ -3,6 +3,15 @@ from app.services.partitions import list_partitions, get_partition
 from app.services.scan import run_expire_scan, list_scan_jobs, list_judgments
 from app.services.execute import execute_judgment, list_runs
 from app.services.reconcile import run_reconcile, list_reports
+from app.services.progress import (
+    advance_progress,
+    annotate_judgments,
+    annotate_partitions,
+    build_card,
+    list_advance_logs,
+    list_cards,
+    list_watermarks,
+)
 
 __all__ = [
     "list_policies",
@@ -16,4 +25,11 @@ __all__ = [
     "list_runs",
     "run_reconcile",
     "list_reports",
+    "advance_progress",
+    "annotate_judgments",
+    "annotate_partitions",
+    "build_card",
+    "list_advance_logs",
+    "list_cards",
+    "list_watermarks",
 ]
